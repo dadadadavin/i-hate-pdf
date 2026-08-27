@@ -1,5 +1,6 @@
 import React, { useRef } from 'react';
 import { Upload, FolderUp, ClipboardPaste } from 'lucide-react';
+import { ACCEPTED_FILE_TYPES } from '../constants/app';
 
 interface DropZoneProps {
   isDraggingOver: boolean;
@@ -39,14 +40,14 @@ export const DropZone: React.FC<DropZoneProps> = ({
         ref={fileInputRef}
         type="file"
         multiple
-        accept=".pdf,.jpg,.jpeg,.png,.webp,.gif,.bmp,.svg,.txt,.csv"
+        accept={ACCEPTED_FILE_TYPES}
         className="hidden"
         onChange={handleFileInputChange}
       />
       <input
         ref={folderInputRef}
         type="file"
-        // @ts-ignore - directory attributes
+        // @ts-expect-error - webkitdirectory is non-standard but supported for folder drops
         webkitdirectory="true"
         directory="true"
         multiple

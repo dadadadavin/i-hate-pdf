@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { CompressionSettings, CompressionPreset } from '../types';
+import type { CompressionSettings, CompressionPreset } from '../types';
 import { X, Check, Sliders, ChevronDown, ChevronUp } from 'lucide-react';
+import { formatBytes } from '../utils/bytes';
+import { COMPRESSION_PRESETS, estimateReductionFactor } from '../constants/compression';
 
 interface CompressModalProps {
   isOpen: boolean;
@@ -8,14 +10,6 @@ interface CompressModalProps {
   originalEstimatedBytes: number;
   onClose: () => void;
   onApply: (settings: CompressionSettings) => void;
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes <= 0) return '0 B';
-  const k = 1024;
-  const sizes = ['B', 'KB', 'MB', 'GB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 }
 
 export const CompressModal: React.FC<CompressModalProps> = ({
@@ -36,53 +30,12 @@ export const CompressModal: React.FC<CompressModalProps> = ({
 
   if (!isOpen) return null;
 
-  // Preset definitions
   const selectPreset = (preset: CompressionPreset) => {
-    if (preset === 'lossless') {
-      setSettings({
-        preset: 'lossless',
-        imageQuality: 0.95,
-        maxDpi: 0,
-        removeMetadata: false,
-        optimizeStreams: true,
-      });
-    } else if (preset === 'high') {
-      setSettings({
-        preset: 'high',
-        imageQuality: 0.85,
-        maxDpi: 200,
-        removeMetadata: false,
-        optimizeStreams: true,
-      });
-    } else if (preset === 'balanced') {
-      setSettings({
-        preset: 'balanced',
-        imageQuality: 0.70,
-        maxDpi: 150,
-        removeMetadata: true,
-        optimizeStreams: true,
-      });
-    } else if (preset === 'small') {
-      setSettings({
-        preset: 'small',
-        imageQuality: 0.50,
-        maxDpi: 100,
-        removeMetadata: true,
-        optimizeStreams: true,
-      });
-    }
+    const presetConfig = COMPRESSION_PRESETS[preset];
+    if (presetConfig) setSettings({ ...presetConfig });
   };
 
-  // Estimate output size based on chosen preset/quality
-  let reductionFactor = 1.0;
-  if (settings.preset === 'lossless') reductionFactor = 0.95;
-  else if (settings.preset === 'high') reductionFactor = 0.65;
-  else if (settings.preset === 'balanced') reductionFactor = 0.38;
-  else if (settings.preset === 'small') reductionFactor = 0.22;
-  else {
-    // Custom calculation
-    reductionFactor = Math.max(0.15, (settings.imageQuality * 0.7) * (settings.maxDpi > 0 ? Math.min(1, settings.maxDpi / 200) : 1));
-  }
+  const reductionFactor = estimateReductionFactor(settings);
 
   const estimatedCompressedBytes = Math.round(originalEstimatedBytes * reductionFactor);
 

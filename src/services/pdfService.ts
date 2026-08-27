@@ -1,13 +1,16 @@
 import { PDFDocument } from 'pdf-lib';
-import {
+import type {
   PageItem,
   SourceFile,
   PdfMetadata,
   CompressionSettings,
 } from '../types';
 import { getPdfDocument, renderPdfPageToCanvas } from './pdfRenderService';
+import type * as pdfjs from 'pdfjs-dist';
+type PDFDocumentProxy = pdfjs.PDFDocumentProxy;
 import { loadImageFromBlob, canvasToBlob } from './imageService';
 import { calculatePageGeometry, drawWysiwygPageToCanvas } from './layoutEngine';
+import { stripExtension } from '../utils/fileType';
 
 /**
  * Apply metadata to a pdf-lib PDFDocument
@@ -55,6 +58,50 @@ export async function generateMergedPdf(
   });
 }
 
+function resolveDpiScale(compression: CompressionSettings): number {
+  if (compression.maxDpi > 0) return Math.min(3.0, Math.max(1.0, compression.maxDpi / 72));
+  switch (compression.preset) {
+    case 'small': return 1.2;
+    case 'balanced': return 1.6;
+    case 'lossless': return 2.5;
+    default: return 2.0;
+  }
+}
+
+function resolveJpegQuality(compression: CompressionSettings): number {
+  if (compression.imageQuality > 0) return compression.imageQuality;
+  switch (compression.preset) {
+    case 'small': return 0.50;
+    case 'balanced': return 0.72;
+    case 'high': return 0.88;
+    case 'lossless': return 0.96;
+    default: return 0.85;
+  }
+}
+
+async function createSourceCanvas(
+  pageItem: PageItem,
+  sourceFile: SourceFile | undefined,
+  dpiScale: number
+): Promise<HTMLCanvasElement> {
+  if (pageItem.fileType === 'pdf' && sourceFile) {
+    const buffer = await sourceFile.file.arrayBuffer();
+    const pdfJsDoc: PDFDocumentProxy = await getPdfDocument(sourceFile.id, buffer);
+    return renderPdfPageToCanvas(pdfJsDoc, pageItem.originalPageIndex, dpiScale, 0);
+  }
+  const img = await loadImageFromBlob(pageItem.blob);
+  const canvas = document.createElement('canvas');
+  canvas.width = img.naturalWidth || img.width;
+  canvas.height = img.naturalHeight || img.height;
+  const ctx = canvas.getContext('2d');
+  if (ctx) {
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0);
+  }
+  return canvas;
+}
+
 /**
  * Render a page with exact WYSIWYG layout and embed into PDF
  */
@@ -64,63 +111,20 @@ async function renderAndEmbedWysiwygPage(
   sourceFile: SourceFile | undefined,
   compression: CompressionSettings
 ) {
-  let dpiScale = 2.0;
-  if (compression.maxDpi > 0) {
-    dpiScale = Math.min(3.0, Math.max(1.0, compression.maxDpi / 72));
-  } else if (compression.preset === 'small') {
-    dpiScale = 1.2;
-  } else if (compression.preset === 'balanced') {
-    dpiScale = 1.6;
-  } else if (compression.preset === 'lossless') {
-    dpiScale = 2.5;
-  }
+  const dpiScale = resolveDpiScale(compression);
+  const sourceCanvas = await createSourceCanvas(pageItem, sourceFile, dpiScale);
 
-  // 1. Get raw content canvas
-  let sourceCanvas: HTMLCanvasElement;
-
-  if (pageItem.fileType === 'pdf' && sourceFile) {
-    const buffer = await sourceFile.file.arrayBuffer();
-    const pdfJsDoc = await getPdfDocument(sourceFile.id, buffer);
-    sourceCanvas = await renderPdfPageToCanvas(docSafe(pdfJsDoc), pageItem.originalPageIndex, dpiScale, 0);
-  } else {
-    const img = await loadImageFromBlob(pageItem.blob);
-    sourceCanvas = document.createElement('canvas');
-    sourceCanvas.width = img.naturalWidth || img.width;
-    sourceCanvas.height = img.naturalHeight || img.height;
-    const ctx = sourceCanvas.getContext('2d');
-    if (ctx) {
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(0, 0, sourceCanvas.width, sourceCanvas.height);
-      ctx.drawImage(img, 0, 0);
-    }
-  }
-
-  // 2. Render complete WYSIWYG sheet to canvas using the shared layout engine
   const targetCanvas = document.createElement('canvas');
   drawWysiwygPageToCanvas(sourceCanvas, pageItem, targetCanvas, {
     scaleMultiplier: dpiScale,
     showMarginGuides: false,
   });
 
-  // 3. Compress canvas to JPEG Blob
-  let quality = 0.85;
-  if (compression.imageQuality > 0) {
-    quality = compression.imageQuality;
-  } else if (compression.preset === 'small') {
-    quality = 0.50;
-  } else if (compression.preset === 'balanced') {
-    quality = 0.72;
-  } else if (compression.preset === 'high') {
-    quality = 0.88;
-  } else if (compression.preset === 'lossless') {
-    quality = 0.96;
-  }
-
+  const quality = resolveJpegQuality(compression);
   const imageBlob = await canvasToBlob(targetCanvas, 'image/jpeg', quality);
   const imageBytes = new Uint8Array(await imageBlob.arrayBuffer());
   const embeddedImage = await outputDoc.embedJpg(imageBytes);
 
-  // 4. Calculate paper dimensions in points
   const geom = calculatePageGeometry(
     pageItem.width,
     pageItem.height,
@@ -129,7 +133,6 @@ async function renderAndEmbedWysiwygPage(
     pageItem.layout
   );
 
-  // 5. Add page with exact paper dimensions
   const page = outputDoc.addPage([geom.paperWidth, geom.paperHeight]);
   page.drawImage(embeddedImage, {
     x: 0,
@@ -137,10 +140,6 @@ async function renderAndEmbedWysiwygPage(
     width: geom.paperWidth,
     height: geom.paperHeight,
   });
-}
-
-function docSafe(doc: any) {
-  return doc;
 }
 
 /**
@@ -166,7 +165,7 @@ export async function generateSplitPdfs(
         compression,
         metadata
       );
-      const baseName = pages[i].fileName.replace(/\.[^/.]+$/, '');
+      const baseName = stripExtension(pages[i].fileName);
       results.push({
         fileName: `${baseName}_page_${i + 1}.pdf`,
         data: singlePageDoc,
@@ -190,7 +189,7 @@ export async function generateSplitPdfs(
         compression,
         metadata
       );
-      const baseName = groupPages[0].fileName.replace(/\.[^/.]+$/, '');
+      const baseName = stripExtension(groupPages[0].fileName);
       results.push({
         fileName: `${baseName}_export.pdf`,
         data: groupDoc,

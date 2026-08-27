@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ViewMode } from '../types';
+import type { ViewMode } from '../types';
 import {
   LayoutGrid,
   FolderTree,
@@ -12,8 +12,10 @@ import {
   ZoomOut,
   Volume2,
   VolumeX,
+  HelpCircle,
 } from 'lucide-react';
 import { toggleMute, getMuteState, playTickSound } from '../services/soundService';
+import { GRID_ZOOM_MIN, GRID_ZOOM_MAX, GRID_ZOOM_STEP } from '../constants/app';
 
 interface HeaderProps {
   pageCount: number;
@@ -25,6 +27,7 @@ interface HeaderProps {
   onPasteClick: () => void;
   onResetClick: () => void;
   onOpenMetadata: () => void;
+  onOpenShortcuts?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -37,6 +40,7 @@ export const Header: React.FC<HeaderProps> = ({
   onPasteClick,
   onResetClick,
   onOpenMetadata,
+  onOpenShortcuts,
 }) => {
   const [isMuted, setIsMuted] = useState(getMuteState());
 
@@ -66,7 +70,7 @@ export const Header: React.FC<HeaderProps> = ({
               {/* Grid Zoom Slider */}
               <div className="hidden lg:flex items-center border border-black px-2 py-1 bg-neutral-50 gap-1.5 font-mono text-xs">
                 <button
-                  onClick={() => onZoomChange(Math.max(0.6, zoomScale - 0.15))}
+                  onClick={() => onZoomChange(Math.max(GRID_ZOOM_MIN, zoomScale - GRID_ZOOM_STEP))}
                   className="p-0.5 hover:bg-black hover:text-white transition-colors"
                   title="Zoom Out Grid"
                 >
@@ -74,16 +78,16 @@ export const Header: React.FC<HeaderProps> = ({
                 </button>
                 <input
                   type="range"
-                  min="60"
-                  max="140"
-                  step="10"
+                  min={Math.round(GRID_ZOOM_MIN * 100)}
+                  max={Math.round(GRID_ZOOM_MAX * 100)}
+                  step={Math.round(GRID_ZOOM_STEP * 100)}
                   value={Math.round(zoomScale * 100)}
                   onChange={(e) => onZoomChange(Number(e.target.value) / 100)}
                   className="w-16 h-1 bg-neutral-300 accent-black cursor-pointer"
                   title={`Grid Scale: ${Math.round(zoomScale * 100)}%`}
                 />
                 <button
-                  onClick={() => onZoomChange(Math.min(1.4, zoomScale + 0.15))}
+                  onClick={() => onZoomChange(Math.min(GRID_ZOOM_MAX, zoomScale + GRID_ZOOM_STEP))}
                   className="p-0.5 hover:bg-black hover:text-white transition-colors"
                   title="Zoom In Grid"
                 >
@@ -102,6 +106,17 @@ export const Header: React.FC<HeaderProps> = ({
               >
                 {isMuted ? <VolumeX size={14} /> : <Volume2 size={14} />}
               </button>
+
+              {/* Shortcuts Helper */}
+              {onOpenShortcuts && (
+                <button
+                  onClick={onOpenShortcuts}
+                  className="p-1.5 border border-black bg-white hover:bg-neutral-100 transition-colors text-black"
+                  title="Keyboard Shortcuts Guide (?)"
+                >
+                  <HelpCircle size={14} />
+                </button>
+              )}
 
               {/* Metadata editor trigger */}
               <button
@@ -165,6 +180,17 @@ export const Header: React.FC<HeaderProps> = ({
                 <RotateCcw size={14} />
               </button>
             </>
+          )}
+
+          {pageCount === 0 && onOpenShortcuts && (
+            <button
+              onClick={onOpenShortcuts}
+              className="p-1.5 border border-black bg-white hover:bg-neutral-100 transition-colors text-black font-mono text-xs flex items-center gap-1"
+              title="Keyboard Shortcuts Guide (?)"
+            >
+              <HelpCircle size={14} />
+              <span className="hidden sm:inline">SHORTCUTS</span>
+            </button>
           )}
         </div>
       </div>

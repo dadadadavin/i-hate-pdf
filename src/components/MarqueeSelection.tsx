@@ -20,20 +20,28 @@ export const MarqueeSelection: React.FC<MarqueeSelectionProps> = ({
   } | null>(null);
 
   const isAdditiveRef = useRef(false);
+  const selectionBoxRef = useRef(selectionBox);
+  const isSelectingRef = useRef(isSelecting);
+
+  // Keep refs in sync without re-subscribing listeners
+  useEffect(() => {
+    selectionBoxRef.current = selectionBox;
+  }, [selectionBox]);
+  useEffect(() => {
+    isSelectingRef.current = isSelecting;
+  }, [isSelecting]);
 
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
     const handleMouseDown = (e: MouseEvent) => {
-      // Ignore if clicking on a card, button, input, or drag handle
       const target = e.target as HTMLElement;
       if (
         target.closest('[data-page-id]') ||
         target.closest('button') ||
         target.closest('input') ||
         target.closest('select') ||
-        target.closest('.dnd-draggable') ||
         e.button !== 0
       ) {
         return;
@@ -45,32 +53,26 @@ export const MarqueeSelection: React.FC<MarqueeSelectionProps> = ({
 
       isAdditiveRef.current = e.shiftKey || e.metaKey || e.ctrlKey;
 
-      setSelectionBox({
-        startX,
-        startY,
-        currentX: startX,
-        currentY: startY,
-      });
+      setSelectionBox({ startX, startY, currentX: startX, currentY: startY });
       setIsSelecting(true);
     };
 
     const handleMouseMove = (e: MouseEvent) => {
-      if (!isSelecting || !selectionBox) return;
+      if (!isSelectingRef.current || !selectionBoxRef.current) return;
 
+      const box = selectionBoxRef.current;
       const rect = container.getBoundingClientRect();
       const currentX = e.clientX - rect.left + container.scrollLeft;
       const currentY = e.clientY - rect.top + container.scrollTop;
 
       setSelectionBox((prev) => (prev ? { ...prev, currentX, currentY } : null));
 
-      // Calculate intersection with all page cards
-      const boxLeft = Math.min(selectionBox.startX, currentX);
-      const boxTop = Math.min(selectionBox.startY, currentY);
-      const boxRight = Math.max(selectionBox.startX, currentX);
-      const boxBottom = Math.max(selectionBox.startY, currentY);
+      const boxLeft = Math.min(box.startX, currentX);
+      const boxTop = Math.min(box.startY, currentY);
+      const boxRight = Math.max(box.startX, currentX);
+      const boxBottom = Math.max(box.startY, currentY);
 
-      // Threshold: only start selecting if dragged at least 8px
-      if (Math.abs(currentX - selectionBox.startX) > 8 || Math.abs(currentY - selectionBox.startY) > 8) {
+      if (Math.abs(currentX - box.startX) > 8 || Math.abs(currentY - box.startY) > 8) {
         const pageCards = container.querySelectorAll<HTMLElement>('[data-page-id]');
         const matchedIds: string[] = [];
 
@@ -81,12 +83,8 @@ export const MarqueeSelection: React.FC<MarqueeSelectionProps> = ({
           const cardRight = cardLeft + cardRect.width;
           const cardBottom = cardTop + cardRect.height;
 
-          // Check AABB box overlap
           const overlaps =
-            boxLeft < cardRight &&
-            boxRight > cardLeft &&
-            boxTop < cardBottom &&
-            boxBottom > cardTop;
+            boxLeft < cardRight && boxRight > cardLeft && boxTop < cardBottom && boxBottom > cardTop;
 
           if (overlaps) {
             const pageId = card.getAttribute('data-page-id');
@@ -112,7 +110,7 @@ export const MarqueeSelection: React.FC<MarqueeSelectionProps> = ({
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [containerRef, isSelecting, selectionBox, onSelectPages]);
+  }, [containerRef, onSelectPages]);
 
   const boxStyle = selectionBox
     ? {

@@ -1,7 +1,8 @@
-import React from 'react';
-import { PageItem, SourceFile } from '../types';
+import React, { useMemo } from 'react';
+import type { PageItem, SourceFile } from '../types';
 import { PageGrid } from './PageGrid';
 import { FileText, Image as ImageIcon, FileCode, RotateCw, Trash2, CheckSquare, Layers } from 'lucide-react';
+import { formatBytes } from '../utils/bytes';
 
 interface FileGroupViewProps {
   pages: PageItem[];
@@ -24,14 +25,6 @@ interface FileGroupViewProps {
   onFlattenToUnified: () => void;
 }
 
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return '0 B';
-  const k = 1024;
-  const sizes = ['B', 'KB', 'MB', 'GB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
-}
-
 export const FileGroupView: React.FC<FileGroupViewProps> = ({
   pages,
   files,
@@ -52,13 +45,9 @@ export const FileGroupView: React.FC<FileGroupViewProps> = ({
   onRemoveFile,
   onFlattenToUnified,
 }) => {
-  const fileGroups = files.map((file) => {
-    const filePages = pages.filter((p) => p.fileId === file.id);
-    return {
-      file,
-      pages: filePages,
-    };
-  }).filter((g) => g.pages.length > 0);
+  const fileGroups = useMemo(() => files
+    .map((file) => ({ file, pages: pages.filter((p) => p.fileId === file.id) }))
+    .filter((g) => g.pages.length > 0), [files, pages]);
 
   return (
     <div className="space-y-12 pb-32">

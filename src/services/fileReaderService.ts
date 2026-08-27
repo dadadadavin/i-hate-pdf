@@ -1,43 +1,11 @@
-import { PageItem, SourceFile, FileType } from '../types';
+import { PageItem, SourceFile } from '../types';
 import { getPdfDocument, renderPdfPageThumbnail } from './pdfRenderService';
 import { processImageFile, renderTextToThumbnail } from './imageService';
+import { generateFileId, generatePageId } from '../utils/id';
+import { detectFileType } from '../utils/fileType';
+import { DEFAULT_PAGE_LAYOUT } from '../constants/app';
 
-function generateId(prefix = 'id'): string {
-  return `${prefix}_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-}
-
-export function detectFileType(file: File): FileType | null {
-  const name = file.name.toLowerCase();
-  const type = file.type.toLowerCase();
-
-  if (type === 'application/pdf' || name.endsWith('.pdf')) {
-    return 'pdf';
-  }
-  if (
-    type.startsWith('image/') ||
-    name.endsWith('.jpg') ||
-    name.endsWith('.jpeg') ||
-    name.endsWith('.png') ||
-    name.endsWith('.webp') ||
-    name.endsWith('.gif') ||
-    name.endsWith('.bmp') ||
-    name.endsWith('.svg')
-  ) {
-    return 'image';
-  }
-  if (
-    type === 'text/plain' ||
-    type === 'text/csv' ||
-    name.endsWith('.txt') ||
-    name.endsWith('.csv') ||
-    name.endsWith('.log') ||
-    name.endsWith('.json') ||
-    name.endsWith('.md')
-  ) {
-    return 'text';
-  }
-  return null;
-}
+export { detectFileType } from '../utils/fileType';
 
 /**
  * Scan dataTransfer items recursively for files and directories (Folder drops)
@@ -71,29 +39,31 @@ export async function extractFilesFromDataTransfer(dataTransfer: DataTransfer): 
   return files;
 }
 
-async function traverseFileTree(item: any, fileList: File[]): Promise<void> {
-  if (item.isFile) {
-    return new Promise((resolve) => {
-      item.file((file: File) => {
+async function traverseFileTree(item: unknown, fileList: File[]): Promise<void> {
+  const entry = item as {
+    isFile: boolean;
+    isDirectory: boolean;
+    file: (success: (file: File) => void, error?: () => void) => void;
+    createReader: () => { readEntries: (success: (entries: unknown[]) => void, error?: () => void) => void };
+  };
+  if (entry.isFile) {
+    return new Promise<void>((resolve) => {
+      entry.file((file: File) => {
         fileList.push(file);
         resolve();
       }, () => resolve());
     });
-  } else if (item.isDirectory) {
-    const dirReader = item.createReader();
-    const readEntries = (): Promise<any[]> => {
-      return new Promise((resolve) => {
-        dirReader.readEntries((entries: any[]) => resolve(entries), () => resolve([]));
+  }
+  if (entry.isDirectory) {
+    const dirReader = entry.createReader();
+    const readEntries = (): Promise<unknown[]> =>
+      new Promise((resolve) => {
+        dirReader.readEntries((entries: unknown[]) => resolve(entries), () => resolve([]));
       });
-    };
 
     let entries = await readEntries();
     while (entries.length > 0) {
-      const promises: Promise<void>[] = [];
-      for (const entry of entries) {
-        promises.push(traverseFileTree(entry, fileList));
-      }
-      await Promise.all(promises);
+      await Promise.all(entries.map((e) => traverseFileTree(e, fileList)));
       entries = await readEntries();
     }
   }
@@ -114,7 +84,7 @@ export async function processSingleFile(
   const fileType = detectFileType(rawFile);
   if (!fileType) return null;
 
-  const fileId = generateId('file');
+  const fileId = generateFileId();
   const pages: PageItem[] = [];
 
   if (fileType === 'pdf') {
@@ -127,7 +97,7 @@ export async function processSingleFile(
       const renderRes = await renderPdfPageThumbnail(pdfDoc, i);
       
       pages.push({
-        id: generateId('page'),
+        id: generatePageId(),
         fileId,
         fileName: rawFile.name,
         fileType: 'pdf',
@@ -136,12 +106,7 @@ export async function processSingleFile(
         width: renderRes.width,
         height: renderRes.height,
         rotation: 0,
-        layout: {
-          format: 'a4',
-          orientation: 'auto',
-          sizingMode: 'fit',
-          marginPt: 0,
-        },
+        layout: { ...DEFAULT_PAGE_LAYOUT },
         blob: rawFile,
         textContent: renderRes.textContent,
       });
@@ -160,7 +125,7 @@ export async function processSingleFile(
     return { file: sourceFile, pages };
   } else if (fileType === 'image') {
     const imageInfo = await processImageFile(rawFile);
-    const pageId = generateId('page');
+    const pageId = generatePageId();
 
     pages.push({
       id: pageId,
@@ -172,12 +137,7 @@ export async function processSingleFile(
       width: imageInfo.width,
       height: imageInfo.height,
       rotation: 0,
-      layout: {
-        format: 'a4',
-        orientation: 'auto',
-        sizingMode: 'fit',
-        marginPt: 0,
-      },
+      layout: { ...DEFAULT_PAGE_LAYOUT },
       blob: rawFile,
     });
 
@@ -195,7 +155,7 @@ export async function processSingleFile(
   } else if (fileType === 'text') {
     const text = await rawFile.text();
     const textInfo = await renderTextToThumbnail(text);
-    const pageId = generateId('page');
+    const pageId = generatePageId();
 
     pages.push({
       id: pageId,
@@ -207,12 +167,7 @@ export async function processSingleFile(
       width: textInfo.width,
       height: textInfo.height,
       rotation: 0,
-      layout: {
-        format: 'a4',
-        orientation: 'auto',
-        sizingMode: 'fit',
-        marginPt: 0,
-      },
+      layout: { ...DEFAULT_PAGE_LAYOUT },
       blob: textInfo.blob,
       textContent: text,
     });

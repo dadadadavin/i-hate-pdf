@@ -1,14 +1,13 @@
 import * as pdfjsLib from 'pdfjs-dist';
 
-// Use Vite's URL import for the worker script
 try {
   pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
     'pdfjs-dist/build/pdf.worker.min.mjs',
     import.meta.url
   ).toString();
 } catch {
-  // Fallback worker URL if needed
-  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
 }
 
 // In-memory cache of parsed PDF documents to speed up multi-page operations
@@ -49,6 +48,9 @@ export interface RenderPageResult {
   textContent: string;
 }
 
+type TextContentItem = { str: string };
+type TextContent = { items: Array<TextContentItem | unknown> };
+
 /**
  * Render a single page to a thumbnail data URL and retrieve metadata
  */
@@ -77,16 +79,15 @@ export async function renderPdfPageThumbnail(
     viewport: viewport,
   }).promise;
 
-  // Extract text content if available
   let textContent = '';
   try {
-    const textData = await page.getTextContent();
+    const textData = (await page.getTextContent()) as unknown as TextContent;
     textContent = textData.items
-      .map((item: any) => ('str' in item ? item.str : ''))
+      .map((item) => (item && typeof item === 'object' && 'str' in item ? (item as TextContentItem).str : ''))
       .join(' ')
       .trim();
   } catch {
-    // Non-fatal if text extraction fails on some scanned PDFs
+    // Non-fatal for scanned PDFs
   }
 
   const thumbnailUrl = canvas.toDataURL('image/jpeg', 0.85);

@@ -1,12 +1,8 @@
 import { PageItem, PageLayoutOptions } from '../types';
+import { STANDARD_PAPER_SIZES } from '../constants/paper';
 
-export const STANDARD_PAPER_SIZES: Record<string, { width: number; height: number; name: string }> = {
-  a4: { width: 595.28, height: 841.89, name: 'A4' }, // 210 × 297 mm
-  letter: { width: 612.0, height: 792.0, name: 'Letter' }, // 8.5 × 11 in
-  legal: { width: 612.0, height: 1008.0, name: 'Legal' }, // 8.5 × 14 in
-  a3: { width: 841.89, height: 1190.55, name: 'A3' }, // 297 × 420 mm
-  a5: { width: 419.53, height: 595.28, name: 'A5' }, // 148 × 210 mm
-};
+// Re-export for backwards compatibility (modals import from here)
+export { STANDARD_PAPER_SIZES } from '../constants/paper';
 
 export interface PageGeometry {
   paperWidth: number; // PDF points
@@ -68,7 +64,8 @@ export function calculatePageGeometry(
     paperW = layout.customWidthPt;
     paperH = layout.customHeightPt;
   } else {
-    const std = STANDARD_PAPER_SIZES[layout.format] || STANDARD_PAPER_SIZES.a4;
+    const key = layout.format as keyof typeof STANDARD_PAPER_SIZES;
+    const std = (STANDARD_PAPER_SIZES[key] as { width: number; height: number } | undefined) ?? STANDARD_PAPER_SIZES.a4;
     let baseW = std.width;
     let baseH = std.height;
 

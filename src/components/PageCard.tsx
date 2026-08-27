@@ -1,7 +1,7 @@
 import React, { memo, useRef, useEffect } from 'react';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { PageItem } from '../types';
+import type { PageItem } from '../types';
 import { drawWysiwygPageToCanvas } from '../services/layoutEngine';
 import {
   RotateCw,
@@ -61,28 +61,32 @@ export const PageCard: React.FC<PageCardProps> = memo(({
   });
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const imageCacheRef = useRef<HTMLImageElement | null>(null);
+  const imageCacheRef = useRef<{ url: string; img: HTMLImageElement } | null>(null);
 
-  // Render true WYSIWYG page layout to canvas
   useEffect(() => {
     let active = true;
 
     async function renderPage() {
-      if (!canvasRef.current) return;
+      const canvas = canvasRef.current;
+      if (!canvas) return;
 
-      if (!imageCacheRef.current) {
-        const img = new Image();
+      let img: HTMLImageElement;
+      if (imageCacheRef.current?.url === page.thumbnailUrl) {
+        img = imageCacheRef.current.img;
+      } else {
+        img = new Image();
         img.src = page.thumbnailUrl;
-        await new Promise((res) => {
-          img.onload = () => res(null);
-          img.onerror = () => res(null);
+        await new Promise<void>((res) => {
+          img.onload = () => res();
+          img.onerror = () => res();
         });
-        imageCacheRef.current = img;
+        if (!active) return;
+        imageCacheRef.current = { url: page.thumbnailUrl, img };
       }
 
-      if (active && imageCacheRef.current && canvasRef.current) {
-        const thumbScale = 0.45 * Math.max(0.6, Math.min(1.5, zoomScale));
-        drawWysiwygPageToCanvas(imageCacheRef.current, page, canvasRef.current, {
+      if (active && canvas) {
+        const thumbScale = 0.45 * Math.max(0.6, Math.min(1.5, zoomScale ?? 1));
+        drawWysiwygPageToCanvas(img, page, canvas, {
           scaleMultiplier: thumbScale,
           showMarginGuides: page.layout.marginPt > 0,
         });
@@ -90,10 +94,7 @@ export const PageCard: React.FC<PageCardProps> = memo(({
     }
 
     renderPage();
-
-    return () => {
-      active = false;
-    };
+    return () => { active = false; };
   }, [page, zoomScale]);
 
   const style: React.CSSProperties = {

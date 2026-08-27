@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, Check } from 'lucide-react';
+import { parseRangeExpression } from '../utils/rangeParser';
 
 interface RangeSelectorModalProps {
   isOpen: boolean;
@@ -18,38 +19,11 @@ export const RangeSelectorModal: React.FC<RangeSelectorModalProps> = ({
   const [parsedCount, setParsedCount] = useState(0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // Parse expression like "1-5, 8, 10-14"
-  const parseRangeExpression = (text: string): number[] => {
-    if (!text.trim()) return [];
-    const indicesSet = new Set<number>();
-    const parts = text.split(/[,;\s]+/).filter(Boolean);
-
-    for (const part of parts) {
-      if (part.includes('-')) {
-        const [startStr, endStr] = part.split('-');
-        const start = parseInt(startStr, 10);
-        const end = parseInt(endStr, 10);
-        if (!isNaN(start) && !isNaN(end)) {
-          const low = Math.max(1, Math.min(start, end));
-          const high = Math.min(totalCount, Math.max(start, end));
-          for (let i = low; i <= high; i++) {
-            indicesSet.add(i - 1); // 0-indexed internally
-          }
-        }
-      } else {
-        const num = parseInt(part, 10);
-        if (!isNaN(num) && num >= 1 && num <= totalCount) {
-          indicesSet.add(num - 1);
-        }
-      }
-    }
-
-    return Array.from(indicesSet).sort((a, b) => a - b);
-  };
+  const parse = (text: string) => parseRangeExpression(text, totalCount);
 
   useEffect(() => {
     if (isOpen) {
-      const parsed = parseRangeExpression(rangeInput);
+      const parsed = parse(rangeInput);
       setParsedCount(parsed.length);
       setErrorMessage(null);
     }
@@ -58,7 +32,7 @@ export const RangeSelectorModal: React.FC<RangeSelectorModalProps> = ({
   if (!isOpen) return null;
 
   const handleApply = () => {
-    const parsed = parseRangeExpression(rangeInput);
+    const parsed = parse(rangeInput);
     if (parsed.length === 0) {
       setErrorMessage('Please enter a valid page number or range (e.g. 1-5, 8, 10-14)');
       return;
