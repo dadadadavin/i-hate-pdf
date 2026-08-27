@@ -4,6 +4,8 @@ import type {
   SourceFile,
   PdfMetadata,
   CompressionSettings,
+  PageNumberingOptions,
+  WatermarkOptions,
 } from '../types';
 import { getPdfDocument, renderPdfPageToCanvas } from './pdfRenderService';
 import type * as pdfjs from 'pdfjs-dist';
@@ -36,6 +38,8 @@ export async function generateMergedPdf(
   filesMap: Map<string, SourceFile>,
   compression: CompressionSettings,
   metadata?: PdfMetadata,
+  numbering?: PageNumberingOptions,
+  watermark?: WatermarkOptions,
   onProgress?: (current: number, total: number) => void
 ): Promise<Uint8Array> {
   const outputDoc = await PDFDocument.create();
@@ -45,7 +49,16 @@ export async function generateMergedPdf(
     if (onProgress) onProgress(i + 1, pages.length);
 
     const sourceFile = filesMap.get(pageItem.fileId);
-    await renderAndEmbedWysiwygPage(outputDoc, pageItem, sourceFile, compression);
+    await renderAndEmbedWysiwygPage(
+      outputDoc,
+      pageItem,
+      sourceFile,
+      compression,
+      i,
+      pages.length,
+      numbering,
+      watermark
+    );
   }
 
   // Set document metadata
@@ -109,7 +122,11 @@ async function renderAndEmbedWysiwygPage(
   outputDoc: PDFDocument,
   pageItem: PageItem,
   sourceFile: SourceFile | undefined,
-  compression: CompressionSettings
+  compression: CompressionSettings,
+  pageIndex: number,
+  totalPages: number,
+  numbering?: PageNumberingOptions,
+  watermark?: WatermarkOptions
 ) {
   const dpiScale = resolveDpiScale(compression);
   const sourceCanvas = await createSourceCanvas(pageItem, sourceFile, dpiScale);
@@ -118,6 +135,10 @@ async function renderAndEmbedWysiwygPage(
   drawWysiwygPageToCanvas(sourceCanvas, pageItem, targetCanvas, {
     scaleMultiplier: dpiScale,
     showMarginGuides: false,
+    pageIndex,
+    totalPages,
+    numbering,
+    watermark,
   });
 
   const quality = resolveJpegQuality(compression);
@@ -152,6 +173,8 @@ export async function generateSplitPdfs(
   mode: 'single-page' | 'by-file' | 'every-n-pages',
   chunkSize = 1,
   metadata?: PdfMetadata,
+  numbering?: PageNumberingOptions,
+  watermark?: WatermarkOptions,
   onProgress?: (current: number, total: number) => void
 ): Promise<{ fileName: string; data: Uint8Array }[]> {
   const results: { fileName: string; data: Uint8Array }[] = [];
@@ -163,7 +186,9 @@ export async function generateSplitPdfs(
         [pages[i]],
         filesMap,
         compression,
-        metadata
+        metadata,
+        numbering,
+        watermark
       );
       const baseName = stripExtension(pages[i].fileName);
       results.push({
@@ -187,7 +212,9 @@ export async function generateSplitPdfs(
         groupPages,
         filesMap,
         compression,
-        metadata
+        metadata,
+        numbering,
+        watermark
       );
       const baseName = stripExtension(groupPages[0].fileName);
       results.push({
@@ -206,7 +233,9 @@ export async function generateSplitPdfs(
         chunkPages,
         filesMap,
         compression,
-        metadata
+        metadata,
+        numbering,
+        watermark
       );
       results.push({
         fileName: `document_part_${chunkIndex}.pdf`,

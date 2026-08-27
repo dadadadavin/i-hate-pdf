@@ -5,6 +5,7 @@ import { drawWysiwygPageToCanvas } from './layoutEngine';
 import { generateMergedPdf, generateSplitPdfs } from './pdfService';
 import { triggerFileDownload, downloadAsZip } from './zipService';
 import { stripExtension } from '../utils/fileType';
+import { recognizeTextFromImage } from './ocrService';
 
 type ProgressSetter = (updater: (prev: ProgressState) => ProgressState) => void;
 type ProgressCallback = (current: number, total: number) => void;
@@ -41,12 +42,33 @@ export async function executeExport(
   }));
 
   try {
+    // If OCR Searchable option is turned on and textContent is missing, run OCR on images
+    if (options.ocrSearchable) {
+      for (let i = 0; i < targetPages.length; i++) {
+        const page = targetPages[i];
+        if (!page.textContent || page.textContent.length < 5) {
+          setProgress((prev) => ({
+            ...prev,
+            statusText: `Running OCR on page ${i + 1} of ${targetPages.length}...`,
+          }));
+          try {
+            const recognized = await recognizeTextFromImage(page.blob);
+            page.textContent = recognized;
+          } catch (ocrErr) {
+            console.warn('OCR error on page', i + 1, ocrErr);
+          }
+        }
+      }
+    }
+
     if (options.format === 'pdf') {
       const pdfBytes = await generateMergedPdf(
         targetPages,
         filesMap,
         options.compression,
         options.metadata,
+        options.numbering,
+        options.watermark,
         makeProgressCallback(setProgress, 'Rendering WYSIWYG page')
       );
       triggerFileDownload(pdfBytes, options.outputFileName);
@@ -66,6 +88,8 @@ export async function executeExport(
         options.splitMode || 'single-page',
         options.splitChunkSize || 1,
         options.metadata,
+        options.numbering,
+        options.watermark,
         makeProgressCallback(setProgress, 'Splitting document chunk')
       );
       downloadAsZip(splitPdfs.map((s) => ({ name: s.fileName, data: s.data })), options.outputFileName);
@@ -137,6 +161,10 @@ async function exportAsImages(
     drawWysiwygPageToCanvas(rawCanvas, page, targetCanvas, {
       scaleMultiplier: options.imageScale,
       showMarginGuides: false,
+      pageIndex: i,
+      totalPages: targetPages.length,
+      numbering: options.numbering,
+      watermark: options.watermark,
     });
 
     const blob = await canvasToBlob(targetCanvas, mimeType as 'image/jpeg' | 'image/png' | 'image/webp', options.imageQuality);

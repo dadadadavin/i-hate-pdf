@@ -3,6 +3,7 @@ import {
   PageFormat,
   PageOrientation,
   SizingMode,
+  ImageFilterType,
 } from '../types';
 import {
   RotateCw,
@@ -16,6 +17,8 @@ import {
   X,
   ChevronDown,
   LayoutTemplate,
+  Wand2,
+  ScanText,
 } from 'lucide-react';
 
 interface SelectionBarProps {
@@ -39,6 +42,8 @@ interface SelectionBarProps {
   onBulkSetSizing: (mode: SizingMode) => void;
   onBulkSetOrientation: (orientation: PageOrientation) => void;
   onBulkSetMargin: (marginMm: number) => void;
+  onBulkSetFilter?: (filter: ImageFilterType) => void;
+  onBulkRecognizeOcr?: () => void;
 }
 
 export const SelectionBar: React.FC<SelectionBarProps> = ({
@@ -62,8 +67,11 @@ export const SelectionBar: React.FC<SelectionBarProps> = ({
   onBulkSetSizing,
   onBulkSetOrientation,
   onBulkSetMargin,
+  onBulkSetFilter,
+  onBulkRecognizeOcr,
 }) => {
   const [showLayoutMenu, setShowLayoutMenu] = useState(false);
+  const [showFilterMenu, setShowFilterMenu] = useState(false);
 
   return (
     <div className="sticky top-16 z-20 bg-white border-b-2 border-black px-4 py-2.5 shadow-[0px_4px_0px_0px_rgba(0,0,0,0.08)] animate-fade-in select-none">
@@ -127,6 +135,47 @@ export const SelectionBar: React.FC<SelectionBarProps> = ({
         {/* Right: Bulk Actions when pages are selected */}
         {selectedCount > 0 && (
           <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+            {/* Quick Filter Menu (Clean Scan / Grayscale / Contrast) */}
+            {onBulkSetFilter && (
+              <div className="relative">
+                <button
+                  onClick={() => setShowFilterMenu(!showFilterMenu)}
+                  className="px-2.5 py-1.5 bg-white border border-black hover:bg-neutral-100 text-xs font-mono flex items-center gap-1 transition-colors font-bold"
+                  title="Enhance document (Clean Scan, Grayscale, High Contrast)"
+                >
+                  <Wand2 size={13} />
+                  <span>FILTER</span>
+                  <ChevronDown size={12} />
+                </button>
+
+                {showFilterMenu && (
+                  <div
+                    className="absolute right-0 mt-1 w-48 bg-white border-2 border-black shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] p-2 z-30 font-mono text-xs space-y-1 animate-fade-in"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {[
+                      { id: 'clean-scan', label: '⚡ Clean Scan (White BG)' },
+                      { id: 'grayscale', label: '⬛ Grayscale' },
+                      { id: 'high-contrast', label: '🔲 High Contrast' },
+                      { id: 'invert', label: '🔄 Invert Colors' },
+                      { id: 'none', label: '❌ Original (No Filter)' },
+                    ].map((f) => (
+                      <button
+                        key={f.id}
+                        onClick={() => {
+                          onBulkSetFilter(f.id as ImageFilterType);
+                          setShowFilterMenu(false);
+                        }}
+                        className="w-full text-left px-2 py-1.5 hover:bg-black hover:text-white transition-colors text-[11px]"
+                      >
+                        {f.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Quick Sizing Mode Toggle (FIT / FILL / STRETCH) */}
             <div className="flex items-center border border-black text-xs font-mono">
               <button
@@ -251,6 +300,18 @@ export const SelectionBar: React.FC<SelectionBarProps> = ({
                 </div>
               )}
             </div>
+
+            {/* OCR Button */}
+            {onBulkRecognizeOcr && (
+              <button
+                onClick={onBulkRecognizeOcr}
+                className="px-2.5 py-1.5 bg-white border border-black hover:bg-neutral-100 text-xs font-mono flex items-center gap-1 transition-colors"
+                title="Recognize text on selected pages (OCR)"
+              >
+                <ScanText size={13} />
+                <span className="hidden lg:inline">OCR</span>
+              </button>
+            )}
 
             {/* Rotate */}
             <div className="flex items-center border border-black">

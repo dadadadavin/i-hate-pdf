@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import type { ViewMode } from '../types';
 import {
   LayoutGrid,
@@ -13,6 +13,7 @@ import {
   Volume2,
   VolumeX,
   HelpCircle,
+  DownloadCloud,
 } from 'lucide-react';
 import { toggleMute, getMuteState, playTickSound } from '../services/soundService';
 import { GRID_ZOOM_MIN, GRID_ZOOM_MAX, GRID_ZOOM_STEP } from '../constants/app';
@@ -43,6 +44,25 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenShortcuts,
 }) => {
   const [isMuted, setIsMuted] = useState(getMuteState());
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+
+  useEffect(() => {
+    const handleBeforeInstall = (e: Event) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+    window.addEventListener('beforeinstallprompt', handleBeforeInstall);
+    return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
+  }, []);
+
+  const handleInstallClick = async () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    if (outcome === 'accepted') {
+      setDeferredPrompt(null);
+    }
+  };
 
   const handleToggleMute = () => {
     const next = toggleMute();
@@ -61,6 +81,17 @@ export const Header: React.FC<HeaderProps> = ({
           <span className="hidden md:inline-flex items-center gap-1 text-[11px] font-mono uppercase px-2 py-0.5 border border-black bg-neutral-100 text-black font-semibold">
             <ShieldCheck size={13} /> 100% Local Engine
           </span>
+
+          {deferredPrompt && (
+            <button
+              onClick={handleInstallClick}
+              className="inline-flex items-center gap-1 text-[11px] font-mono uppercase px-2.5 py-1 border-2 border-black bg-black text-white font-bold hover:bg-neutral-800 transition-colors shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]"
+              title="Install I HATE PDF as standalone Desktop App"
+            >
+              <DownloadCloud size={13} />
+              <span>INSTALL APP</span>
+            </button>
+          )}
         </div>
 
         {/* Right: Actions & Controls */}

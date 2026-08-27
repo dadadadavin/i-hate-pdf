@@ -11,6 +11,7 @@ import type {
   PageFormat,
   PageOrientation,
   SizingMode,
+  ImageFilterType,
   ExportOptions,
 } from './types';
 import { Header } from './components/Header';
@@ -39,6 +40,7 @@ import { useWorkspacePersistence } from './hooks/useWorkspacePersistence';
 
 import { clearPdfCache } from './services/pdfRenderService';
 import { executeExport } from './services/exportService';
+import { recognizeTextFromImage } from './services/ocrService';
 import { playTickSound, playSuccessSound } from './services/soundService';
 
 import { generateDupId } from './utils/id';
@@ -59,7 +61,7 @@ export const App: React.FC = () => {
   // Selection
   const selection = usePageSelection(pages);
 
-  // Progress (shared between ingestion & export)
+  // Progress (shared between ingestion & export & OCR)
   const [progress, setProgress] = useState<ProgressState>({
     isOpen: false, title: '', current: 0, total: 0, statusText: '', canCancel: false,
   });
@@ -208,6 +210,44 @@ export const App: React.FC = () => {
     setPages(prev => prev.map(p => selection.selectedIds.has(p.id) ? { ...p, layout: { ...p.layout, marginPt } } : p));
     playTickSound();
   }, [selection.selectedIds]);
+
+  const bulkSetFilter = useCallback((filter: ImageFilterType) => {
+    setPages(prev => prev.map(p => selection.selectedIds.has(p.id) ? { ...p, filter } : p));
+    playSuccessSound();
+  }, [selection.selectedIds]);
+
+  const handleBulkRecognizeOcr = useCallback(async () => {
+    const targetPages = pages.filter(p => selection.selectedIds.has(p.id));
+    if (targetPages.length === 0) return;
+
+    setProgress({
+      isOpen: true,
+      title: 'LOCAL OCR (TEXT RECOGNITION)',
+      current: 0,
+      total: targetPages.length,
+      statusText: 'Initializing Tesseract WebAssembly...',
+      canCancel: false,
+    });
+
+    for (let i = 0; i < targetPages.length; i++) {
+      const page = targetPages[i];
+      setProgress(prev => ({
+        ...prev,
+        current: i + 1,
+        statusText: `Recognizing text on page ${i + 1} of ${targetPages.length}...`,
+      }));
+
+      try {
+        const text = await recognizeTextFromImage(page.blob);
+        setPages(prev => prev.map(p => p.id === page.id ? { ...p, textContent: text } : p));
+      } catch (err) {
+        console.error('OCR recognition error:', err);
+      }
+    }
+
+    playSuccessSound();
+    setProgress({ isOpen: false, title: '', current: 0, total: 0, statusText: '' });
+  }, [pages, selection.selectedIds]);
 
   const updatePageLayout = useCallback((pageId: string, updates: Partial<PageLayoutOptions>) => {
     setPages(prev => prev.map(p => p.id === pageId ? { ...p, layout: { ...p.layout, ...updates } } : p));
@@ -378,6 +418,8 @@ export const App: React.FC = () => {
             onBulkSetSizing={bulkSetSizing}
             onBulkSetOrientation={bulkSetOrientation}
             onBulkSetMargin={bulkSetMargin}
+            onBulkSetFilter={bulkSetFilter}
+            onBulkRecognizeOcr={handleBulkRecognizeOcr}
           />
 
           <div className="mt-6">

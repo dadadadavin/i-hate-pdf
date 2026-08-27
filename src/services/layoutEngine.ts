@@ -1,7 +1,7 @@
-import { PageItem, PageLayoutOptions } from '../types';
+import { PageItem, PageLayoutOptions, PageNumberingOptions, WatermarkOptions } from '../types';
 import { STANDARD_PAPER_SIZES } from '../constants/paper';
+import { applyImageFilterToCanvas } from './imageFilterService';
 
-// Re-export for backwards compatibility (modals import from here)
 export { STANDARD_PAPER_SIZES } from '../constants/paper';
 
 export interface PageGeometry {
@@ -37,7 +37,6 @@ export function calculatePageGeometry(
     marginPt: 0,
   }
 ): PageGeometry {
-  // 1. Calculate effective content dimensions after crop
   let effectiveW = contentWidth || 600;
   let effectiveH = contentHeight || 800;
 
@@ -46,14 +45,12 @@ export function calculatePageGeometry(
     effectiveH = Math.max(1, crop.height * effectiveH);
   }
 
-  // 2. Account for 90 or 270 degree rotation on effective content box
   const normalizedRotation = ((rotation % 360) + 360) % 360;
   const isRotated90or270 = normalizedRotation === 90 || normalizedRotation === 270;
   const rotatedContentW = isRotated90or270 ? effectiveH : effectiveW;
   const rotatedContentH = isRotated90or270 ? effectiveW : effectiveH;
   const contentAspect = rotatedContentW / rotatedContentH;
 
-  // 3. Determine Paper Sheet Dimensions
   let paperW = 595.28;
   let paperH = 841.89;
 
@@ -66,8 +63,8 @@ export function calculatePageGeometry(
   } else {
     const key = layout.format as keyof typeof STANDARD_PAPER_SIZES;
     const std = (STANDARD_PAPER_SIZES[key] as { width: number; height: number } | undefined) ?? STANDARD_PAPER_SIZES.a4;
-    let baseW = std.width;
-    let baseH = std.height;
+    const baseW = std.width;
+    const baseH = std.height;
 
     if (layout.orientation === 'landscape') {
       paperW = Math.max(baseW, baseH);
@@ -76,13 +73,10 @@ export function calculatePageGeometry(
       paperW = Math.min(baseW, baseH);
       paperH = Math.max(baseW, baseH);
     } else {
-      // Auto: match content orientation
       if (contentAspect >= 1.0) {
-        // Landscape content
         paperW = Math.max(baseW, baseH);
         paperH = Math.min(baseW, baseH);
       } else {
-        // Portrait content
         paperW = Math.min(baseW, baseH);
         paperH = Math.max(baseW, baseH);
       }
@@ -91,14 +85,12 @@ export function calculatePageGeometry(
 
   const paperAspect = paperW / paperH;
 
-  // 4. Calculate Printable Area (inside margins)
   const margin = Math.min(layout.marginPt || 0, Math.min(paperW, paperH) / 3);
   const printableX = margin;
   const printableY = margin;
   const printableWidth = Math.max(1, paperW - margin * 2);
   const printableHeight = Math.max(1, paperH - margin * 2);
 
-  // 5. Position & Scale Content on the Sheet
   let drawX = printableX;
   let drawY = printableY;
   let drawWidth = printableWidth;
@@ -129,7 +121,6 @@ export function calculatePageGeometry(
     drawX = printableX;
     drawY = printableY;
   } else {
-    // Original 1:1 sizing centered
     scale = 1.0;
     drawWidth = rotatedContentW;
     drawHeight = rotatedContentH;
@@ -158,7 +149,6 @@ export function calculatePageGeometry(
 
 /**
  * Render a complete WYSIWYG sheet on an HTML5 canvas.
- * Renders the paper background, any letterbox margin whitespace, content, and clipping.
  */
 export function drawWysiwygPageToCanvas(
   sourceCanvasOrImage: HTMLCanvasElement | HTMLImageElement,
@@ -167,6 +157,10 @@ export function drawWysiwygPageToCanvas(
   options: {
     showMarginGuides?: boolean;
     scaleMultiplier?: number;
+    pageIndex?: number;
+    totalPages?: number;
+    numbering?: PageNumberingOptions;
+    watermark?: WatermarkOptions;
   } = {}
 ) {
   const geom = calculatePageGeometry(
@@ -205,7 +199,7 @@ export function drawWysiwygPageToCanvas(
     ctx.setLineDash([]);
   }
 
-  // 3. Prepare content (cropped and rotated)
+  // 3. Prepare content (cropped)
   const srcW = 'naturalWidth' in sourceCanvasOrImage ? sourceCanvasOrImage.naturalWidth : sourceCanvasOrImage.width;
   const srcH = 'naturalHeight' in sourceCanvasOrImage ? sourceCanvasOrImage.naturalHeight : sourceCanvasOrImage.height;
 
@@ -221,7 +215,6 @@ export function drawWysiwygPageToCanvas(
     cropH = Math.round(page.crop.height * srcH);
   }
 
-  // Intermediate crop canvas
   const cropCanvas = document.createElement('canvas');
   cropCanvas.width = Math.max(1, cropW);
   cropCanvas.height = Math.max(1, cropH);
@@ -230,9 +223,14 @@ export function drawWysiwygPageToCanvas(
     cropCtx.fillStyle = '#ffffff';
     cropCtx.fillRect(0, 0, cropW, cropH);
     cropCtx.drawImage(sourceCanvasOrImage, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+
+    // Apply Real-time Image Filter (Clean Scan, Grayscale, High Contrast, Invert)
+    if (page.filter && page.filter !== 'none') {
+      applyImageFilterToCanvas(cropCanvas, page.filter);
+    }
   }
 
-  // 4. Clip to printable area if fill/crop occurs
+  // 4. Clip to printable area
   ctx.save();
   ctx.beginPath();
   ctx.rect(
@@ -267,4 +265,122 @@ export function drawWysiwygPageToCanvas(
   );
   ctx.restore();
   ctx.restore(); // Restore clip
+
+  // 6. Draw Optional Watermark
+  if (options.watermark && options.watermark.enabled && options.watermark.text) {
+    drawWatermark(ctx, canvasW, canvasH, scale, options.watermark);
+  }
+
+  // 7. Draw Optional Page Numbering Stamp
+  if (
+    options.numbering &&
+    options.numbering.enabled &&
+    options.pageIndex !== undefined &&
+    options.totalPages !== undefined
+  ) {
+    drawPageNumbering(
+      ctx,
+      canvasW,
+      canvasH,
+      scale,
+      options.pageIndex,
+      options.totalPages,
+      options.numbering
+    );
+  }
+}
+
+function drawWatermark(
+  ctx: CanvasRenderingContext2D,
+  canvasW: number,
+  canvasH: number,
+  scale: number,
+  wm: WatermarkOptions
+) {
+  ctx.save();
+  ctx.translate(canvasW / 2, canvasH / 2);
+  ctx.rotate(((wm.rotationDeg || -45) * Math.PI) / 180);
+
+  const fontSize = (wm.fontSizePt || 48) * scale;
+  ctx.font = `900 ${fontSize}px monospace`;
+  ctx.fillStyle = `rgba(0, 0, 0, ${wm.opacity || 0.15})`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(wm.text.toUpperCase(), 0, 0);
+
+  ctx.restore();
+}
+
+function drawPageNumbering(
+  ctx: CanvasRenderingContext2D,
+  canvasW: number,
+  canvasH: number,
+  scale: number,
+  pageIndex: number,
+  totalPages: number,
+  num: PageNumberingOptions
+) {
+  const currentNum = (num.startNumber || 1) + pageIndex;
+  let text = `${currentNum}`;
+  if (num.format === 'page-n-of-total') {
+    text = `Page ${currentNum} of ${totalPages}`;
+  } else if (num.format === 'page-n') {
+    text = `Page ${currentNum}`;
+  }
+
+  const fontSize = (num.fontSizePt || 10) * scale;
+  const padding = 20 * scale;
+
+  ctx.save();
+  ctx.font = `600 ${fontSize}px monospace`;
+  ctx.fillStyle = '#000000';
+
+  let x = canvasW / 2;
+  let y = canvasH - padding;
+  let align: CanvasTextAlign = 'center';
+  let baseline: CanvasTextBaseline = 'bottom';
+
+  switch (num.position) {
+    case 'bottom-left':
+      x = padding;
+      y = canvasH - padding;
+      align = 'left';
+      baseline = 'bottom';
+      break;
+    case 'bottom-center':
+      x = canvasW / 2;
+      y = canvasH - padding;
+      align = 'center';
+      baseline = 'bottom';
+      break;
+    case 'bottom-right':
+      x = canvasW - padding;
+      y = canvasH - padding;
+      align = 'right';
+      baseline = 'bottom';
+      break;
+    case 'top-left':
+      x = padding;
+      y = padding;
+      align = 'left';
+      baseline = 'top';
+      break;
+    case 'top-center':
+      x = canvasW / 2;
+      y = padding;
+      align = 'center';
+      baseline = 'top';
+      break;
+    case 'top-right':
+      x = canvasW - padding;
+      y = padding;
+      align = 'right';
+      baseline = 'top';
+      break;
+  }
+
+  ctx.textAlign = align;
+  ctx.textBaseline = baseline;
+  ctx.fillText(text, x, y);
+  ctx.restore();
 }
