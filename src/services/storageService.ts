@@ -59,7 +59,7 @@ export async function saveWorkspaceSession(
       await tx.objectStore(STORE_FILES).put(file);
     }
 
-    // Store page items (converting any object URLs to persistent items)
+    // Store page items
     for (const page of pages) {
       await tx.objectStore(STORE_PAGES).put(page);
     }
@@ -97,11 +97,21 @@ export async function loadWorkspaceSession(): Promise<StoredSession | null> {
     const files = (await tx.objectStore(STORE_FILES).getAll()) as SourceFile[];
     const rawPages = (await tx.objectStore(STORE_PAGES).getAll()) as PageItem[];
 
-    // Index pages by ID
+    // Index pages by ID and ensure valid thumbnail blob URLs
     const pagesMap = new Map<string, PageItem>();
     for (const page of rawPages) {
-      // Re-generate a valid blob URL for thumbnail if needed
-      pagesMap.set(page.id, page);
+      let thumb = page.thumbnailUrl;
+      if (page.blob && (!thumb || thumb.startsWith('blob:'))) {
+        try {
+          thumb = URL.createObjectURL(page.blob);
+        } catch {
+          // Keep existing if fail
+        }
+      }
+      pagesMap.set(page.id, {
+        ...page,
+        thumbnailUrl: thumb || page.thumbnailUrl,
+      });
     }
 
     // Order pages according to pageOrder

@@ -94,8 +94,10 @@ export const PageCard: React.FC<PageCardProps> = memo(({
     }
 
     renderPage();
-    return () => { active = false; };
-  }, [page, zoomScale]);
+    return () => {
+      active = false;
+    };
+  }, [page, page.layout, page.rotation, page.crop, page.filter, zoomScale]);
 
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
@@ -179,24 +181,22 @@ export const PageCard: React.FC<PageCardProps> = memo(({
               }`}
               title="Preview full page (or double-click)"
             >
-              <Eye size={13} />
+              <Eye size={14} />
             </button>
           )}
 
           {/* Selection Checkbox */}
-          {onSelect && (
+          {!isOverlay && onSelect && (
             <button
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
                 onSelect(page.id, e);
               }}
-              className={`w-4 h-4 border flex items-center justify-center transition-colors ${
-                isSelected
-                  ? 'bg-white text-black border-white'
-                  : 'bg-white text-black border-black hover:bg-neutral-100'
+              className={`w-4 h-4 border border-black flex items-center justify-center transition-colors ${
+                isSelected ? 'bg-white text-black' : 'bg-white hover:bg-neutral-100'
               }`}
-              aria-label="Select page"
+              title={isSelected ? 'Deselect page' : 'Select page'}
             >
               {isSelected && <Check size={12} strokeWidth={3.5} />}
             </button>
@@ -218,6 +218,16 @@ export const PageCard: React.FC<PageCardProps> = memo(({
 
           {/* Indicators for modifications */}
           <div className="absolute bottom-1 right-1 flex items-center gap-1 pointer-events-none">
+            {page.filter && page.filter !== 'none' && (
+              <span className="bg-black text-white text-[8px] font-mono px-1 py-0.2 uppercase">
+                {page.filter}
+              </span>
+            )}
+            {page.textContent && page.textContent.length > 5 && (
+              <span className="bg-neutral-800 text-white text-[8px] font-mono px-1 py-0.2 uppercase">
+                OCR
+              </span>
+            )}
             {page.crop && (
               <span className="bg-black text-white text-[8px] font-mono px-1 py-0.2 uppercase">
                 CROP

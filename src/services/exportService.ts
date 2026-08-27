@@ -5,7 +5,7 @@ import { drawWysiwygPageToCanvas } from './layoutEngine';
 import { generateMergedPdf, generateSplitPdfs } from './pdfService';
 import { triggerFileDownload, downloadAsZip } from './zipService';
 import { stripExtension } from '../utils/fileType';
-import { recognizeTextFromImage } from './ocrService';
+import { recognizePageText } from './ocrService';
 
 type ProgressSetter = (updater: (prev: ProgressState) => ProgressState) => void;
 type ProgressCallback = (current: number, total: number) => void;
@@ -42,7 +42,7 @@ export async function executeExport(
   }));
 
   try {
-    // If OCR Searchable option is turned on and textContent is missing, run OCR on images
+    // If OCR Searchable option is turned on and textContent is missing, run OCR on pages
     if (options.ocrSearchable) {
       for (let i = 0; i < targetPages.length; i++) {
         const page = targetPages[i];
@@ -52,7 +52,8 @@ export async function executeExport(
             statusText: `Running OCR on page ${i + 1} of ${targetPages.length}...`,
           }));
           try {
-            const recognized = await recognizeTextFromImage(page.blob);
+            const sourceFile = filesMap.get(page.fileId);
+            const recognized = await recognizePageText(page, sourceFile);
             page.textContent = recognized;
           } catch (ocrErr) {
             console.warn('OCR error on page', i + 1, ocrErr);

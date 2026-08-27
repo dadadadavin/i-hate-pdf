@@ -40,7 +40,7 @@ import { useWorkspacePersistence } from './hooks/useWorkspacePersistence';
 
 import { clearPdfCache } from './services/pdfRenderService';
 import { executeExport } from './services/exportService';
-import { recognizeTextFromImage } from './services/ocrService';
+import { recognizePageText } from './services/ocrService';
 import { playTickSound, playSuccessSound } from './services/soundService';
 
 import { generateDupId } from './utils/id';
@@ -229,6 +229,8 @@ export const App: React.FC = () => {
       canCancel: false,
     });
 
+    const filesMap = new Map<string, SourceFile>(files.map(f => [f.id, f]));
+
     for (let i = 0; i < targetPages.length; i++) {
       const page = targetPages[i];
       setProgress(prev => ({
@@ -238,7 +240,8 @@ export const App: React.FC = () => {
       }));
 
       try {
-        const text = await recognizeTextFromImage(page.blob);
+        const sourceFile = filesMap.get(page.fileId);
+        const text = await recognizePageText(page, sourceFile);
         setPages(prev => prev.map(p => p.id === page.id ? { ...p, textContent: text } : p));
       } catch (err) {
         console.error('OCR recognition error:', err);
@@ -247,7 +250,7 @@ export const App: React.FC = () => {
 
     playSuccessSound();
     setProgress({ isOpen: false, title: '', current: 0, total: 0, statusText: '' });
-  }, [pages, selection.selectedIds]);
+  }, [pages, files, selection.selectedIds]);
 
   const updatePageLayout = useCallback((pageId: string, updates: Partial<PageLayoutOptions>) => {
     setPages(prev => prev.map(p => p.id === pageId ? { ...p, layout: { ...p.layout, ...updates } } : p));
@@ -535,6 +538,10 @@ export const App: React.FC = () => {
         onOpenCrop={(p) => { setIsPreviewOpen(false); handleOpenCrop(p); }}
         onDelete={deleteSingle}
         onUpdatePageLayout={updatePageLayout}
+        onUpdatePageFilter={(pageId, filter) => {
+          setPages(prev => prev.map(p => p.id === pageId ? { ...p, filter } : p));
+          playSuccessSound();
+        }}
       />
 
       <ShortcutsModal
