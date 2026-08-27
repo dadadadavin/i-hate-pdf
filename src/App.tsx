@@ -5,7 +5,6 @@ import {
   PdfMetadata,
   CompressionSettings,
   ViewMode,
-  CardDensity,
   ProgressState,
   CropRect,
   PageLayoutOptions,
@@ -28,6 +27,7 @@ import { CompressModal } from './components/CompressModal';
 import { ExportModal } from './components/ExportModal';
 import { ProgressModal } from './components/ProgressModal';
 import { PreviewModal } from './components/PreviewModal';
+import { MarqueeSelection } from './components/MarqueeSelection';
 
 import {
   processSingleFile,
@@ -53,6 +53,7 @@ import {
   loadWorkspaceSession,
   clearWorkspaceSession,
 } from './services/storageService';
+import { playTickSound, playSuccessSound } from './services/soundService';
 
 export const App: React.FC = () => {
   // Main State
@@ -61,9 +62,9 @@ export const App: React.FC = () => {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [lastSelectedIndex, setLastSelectedIndex] = useState<number | null>(null);
 
-  // Settings
+  // Settings & Canvas View
   const [viewMode, setViewMode] = useState<ViewMode>('unified');
-  const [cardDensity, setCardDensity] = useState<CardDensity>('normal');
+  const [zoomScale, setZoomScale] = useState<number>(1.0);
   const [compression, setCompression] = useState<CompressionSettings>({
     preset: 'high',
     imageQuality: 0.85,
@@ -109,13 +110,13 @@ export const App: React.FC = () => {
   const fileInputTriggerRef = useRef<HTMLInputElement>(null);
   const dragCounterRef = useRef<number>(0);
   const pasteCountRef = useRef<number>(1);
+  const workspaceContainerRef = useRef<HTMLDivElement | null>(null);
 
   // 1. Session Restoration on initial mount
   useEffect(() => {
     async function restore() {
       const stored = await loadWorkspaceSession();
       if (stored && stored.pages.length > 0) {
-        // Upgrade legacy stored pages with default layout if missing
         const upgradedPages = stored.pages.map((p) => ({
           ...p,
           layout: p.layout || {
@@ -185,6 +186,7 @@ export const App: React.FC = () => {
 
     setPages((prev) => [...prev, ...addedPages]);
     setFiles((prev) => [...prev, ...addedFiles]);
+    playSuccessSound();
 
     setProgress({
       isOpen: false,
@@ -195,7 +197,7 @@ export const App: React.FC = () => {
     });
   }, []);
 
-  // 3. Global Drag & Drop Handlers
+  // 3. Global Drag & Drop Handlers for File Ingestion
   useEffect(() => {
     const handleDragEnter = (e: DragEvent) => {
       e.preventDefault();
@@ -336,13 +338,14 @@ export const App: React.FC = () => {
 
       alert('Clipboard is empty or does not contain image/text data. Press Cmd+V / Ctrl+V directly.');
     } catch {
-      alert('Press Cmd+V (Mac) or Ctrl+V (Windows) to paste.');
+      alert('Press Cmd+V (Mac) or Ctrl+V (Windows) anywhere on the page to paste.');
     }
   };
 
   // Selection Logic
   const selectAllPages = useCallback(() => {
     setSelectedIds(new Set(pages.map((p) => p.id)));
+    playTickSound();
   }, [pages]);
 
   const deselectAllPages = useCallback(() => {
@@ -354,6 +357,63 @@ export const App: React.FC = () => {
     setPages((prev) => prev.filter((p) => !selectedIds.has(p.id)));
     setSelectedIds(new Set());
     setLastSelectedIndex(null);
+    playTickSound();
+  }, [selectedIds]);
+
+  // Page Operations
+  const handleRotateSinglePageCw = useCallback((id: string) => {
+    setPages((prev) =>
+      prev.map((p) =>
+        p.id === id ? { ...p, rotation: ((p.rotation + 90) % 360) } : p
+      )
+    );
+    playTickSound();
+  }, []);
+
+  const handleRotateSinglePageCcw = useCallback((id: string) => {
+    setPages((prev) =>
+      prev.map((p) =>
+        p.id === id ? { ...p, rotation: (((p.rotation - 90) % 360) + 360) % 360 } : p
+      )
+    );
+    playTickSound();
+  }, []);
+
+  const handleRotateSelectedCw = useCallback(() => {
+    setPages((prev) =>
+      prev.map((p) =>
+        selectedIds.has(p.id) ? { ...p, rotation: (p.rotation + 90) % 360 } : p
+      )
+    );
+    playTickSound();
+  }, [selectedIds]);
+
+  const handleRotateSelectedCcw = useCallback(() => {
+    setPages((prev) =>
+      prev.map((p) =>
+        selectedIds.has(p.id)
+          ? { ...p, rotation: (((p.rotation - 90) % 360) + 360) % 360 }
+          : p
+      )
+    );
+    playTickSound();
+  }, [selectedIds]);
+
+  const handleDuplicateSelected = useCallback(() => {
+    setPages((prev) => {
+      const next: PageItem[] = [];
+      for (const p of prev) {
+        next.push(p);
+        if (selectedIds.has(p.id)) {
+          next.push({
+            ...p,
+            id: `page_dup_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+          });
+        }
+      }
+      return next;
+    });
+    playTickSound();
   }, [selectedIds]);
 
   // 5. Global Keyboard Shortcuts
@@ -388,13 +448,34 @@ export const App: React.FC = () => {
           setIsPreviewOpen(true);
         }
       }
+
+      // 'R' key: Quick rotate selected clockwise
+      if (e.key.toLowerCase() === 'r' && selectedIds.size > 0 && !e.metaKey && !e.ctrlKey) {
+        e.preventDefault();
+        handleRotateSelectedCw();
+      }
+
+      // 'D' key: Quick duplicate selected
+      if (e.key.toLowerCase() === 'd' && selectedIds.size > 0 && !e.metaKey && !e.ctrlKey) {
+        e.preventDefault();
+        handleDuplicateSelected();
+      }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [pages, selectedIds, isPreviewOpen, selectAllPages, deselectAllPages, deleteSelectedPages]);
+  }, [
+    pages,
+    selectedIds,
+    isPreviewOpen,
+    selectAllPages,
+    deselectAllPages,
+    deleteSelectedPages,
+    handleRotateSelectedCw,
+    handleDuplicateSelected,
+  ]);
 
-  // Reorder pages in Unified Grid
+  // Reorder Single Page
   const handleReorderPages = (activeId: string, overId: string) => {
     setPages((currentPages) => {
       const oldIndex = currentPages.findIndex((p) => p.id === activeId);
@@ -408,52 +489,87 @@ export const App: React.FC = () => {
     });
   };
 
-  // True Multi-Select Handler (Click, Shift+Click, Cmd/Ctrl+Click)
-  const handlePageSelect = useCallback((id: string, e: React.MouseEvent) => {
-    const clickedIndex = pages.findIndex((p) => p.id === id);
-    if (clickedIndex === -1) return;
+  // Reorder Multiple Selected Pages together
+  const handleReorderMultiple = (
+    _draggedId: string,
+    overId: string,
+    selectedIdSet: Set<string>
+  ) => {
+    setPages((currentPages) => {
+      const targetIndex = currentPages.findIndex((p) => p.id === overId);
+      if (targetIndex === -1) return currentPages;
 
-    if (e.shiftKey && lastSelectedIndex !== null) {
-      const start = Math.min(lastSelectedIndex, clickedIndex);
-      const end = Math.max(lastSelectedIndex, clickedIndex);
-      const rangeIds = pages.slice(start, end + 1).map((p) => p.id);
+      const selectedPages = currentPages.filter((p) => selectedIdSet.has(p.id));
+      const unselectedPages = currentPages.filter((p) => !selectedIdSet.has(p.id));
 
-      setSelectedIds((prev) => {
-        const next = new Set(prev);
-        rangeIds.forEach((item) => next.add(item));
-        return next;
-      });
-    } else if (e.metaKey || e.ctrlKey) {
-      setSelectedIds((prev) => {
-        const next = new Set(prev);
-        if (next.has(id)) next.delete(id);
-        else next.add(id);
-        return next;
-      });
-      setLastSelectedIndex(clickedIndex);
-    } else {
-      setSelectedIds((prev) => {
-        const next = new Set(prev);
-        if (next.has(id) && next.size === 1) {
-          next.clear();
-        } else {
-          next.clear();
-          next.add(id);
-        }
-        return next;
-      });
-      setLastSelectedIndex(clickedIndex);
-    }
-  }, [pages, lastSelectedIndex]);
+      const newInsertIndex = Math.min(targetIndex, unselectedPages.length);
+      const result = [...unselectedPages];
+      result.splice(newInsertIndex, 0, ...selectedPages);
+      return result;
+    });
+  };
+
+  // Multi-Select Card Handler
+  const handlePageSelect = useCallback(
+    (id: string, e: React.MouseEvent) => {
+      const clickedIndex = pages.findIndex((p) => p.id === id);
+      if (clickedIndex === -1) return;
+      playTickSound();
+
+      if (e.shiftKey && lastSelectedIndex !== null) {
+        const start = Math.min(lastSelectedIndex, clickedIndex);
+        const end = Math.max(lastSelectedIndex, clickedIndex);
+        const rangeIds = pages.slice(start, end + 1).map((p) => p.id);
+
+        setSelectedIds((prev) => {
+          const next = new Set(prev);
+          rangeIds.forEach((item) => next.add(item));
+          return next;
+        });
+      } else if (e.metaKey || e.ctrlKey) {
+        setSelectedIds((prev) => {
+          const next = new Set(prev);
+          if (next.has(id)) next.delete(id);
+          else next.add(id);
+          return next;
+        });
+        setLastSelectedIndex(clickedIndex);
+      } else {
+        setSelectedIds((prev) => {
+          const next = new Set(prev);
+          if (next.has(id) && next.size === 1) {
+            next.clear();
+          } else {
+            next.clear();
+            next.add(id);
+          }
+          return next;
+        });
+        setLastSelectedIndex(clickedIndex);
+      }
+    },
+    [pages, lastSelectedIndex]
+  );
+
+  // Marquee Selection Box Handler (drag rectangle over cards)
+  const handleMarqueeSelect = useCallback((matchedIds: string[], isAdditive: boolean) => {
+    setSelectedIds((prev) => {
+      const next = isAdditive ? new Set(prev) : new Set<string>();
+      matchedIds.forEach((id) => next.add(id));
+      return next;
+    });
+  }, []);
 
   const selectOddPages = () => {
     const odds = pages.filter((_, i) => i % 2 === 0).map((p) => p.id);
     setSelectedIds(new Set(odds));
+    playTickSound();
   };
 
   const selectEvenPages = () => {
     const evens = pages.filter((_, i) => i % 2 !== 0).map((p) => p.id);
     setSelectedIds(new Set(evens));
+    playTickSound();
   };
 
   const invertSelection = () => {
@@ -464,46 +580,13 @@ export const App: React.FC = () => {
       });
       return next;
     });
+    playTickSound();
   };
 
   const handleApplyRangeSelection = (indices: number[]) => {
     const targetIds = indices.map((idx) => pages[idx]?.id).filter(Boolean);
     setSelectedIds(new Set(targetIds));
-  };
-
-  // Bulk Operations
-  const handleRotateSinglePageCw = (id: string) => {
-    setPages((prev) =>
-      prev.map((p) =>
-        p.id === id ? { ...p, rotation: ((p.rotation + 90) % 360) } : p
-      )
-    );
-  };
-
-  const handleRotateSinglePageCcw = (id: string) => {
-    setPages((prev) =>
-      prev.map((p) =>
-        p.id === id ? { ...p, rotation: (((p.rotation - 90) % 360) + 360) % 360 } : p
-      )
-    );
-  };
-
-  const handleRotateSelectedCw = () => {
-    setPages((prev) =>
-      prev.map((p) =>
-        selectedIds.has(p.id) ? { ...p, rotation: (p.rotation + 90) % 360 } : p
-      )
-    );
-  };
-
-  const handleRotateSelectedCcw = () => {
-    setPages((prev) =>
-      prev.map((p) =>
-        selectedIds.has(p.id)
-          ? { ...p, rotation: (((p.rotation - 90) % 360) + 360) % 360 }
-          : p
-      )
-    );
+    playTickSound();
   };
 
   const handleDeleteSinglePage = (id: string) => {
@@ -513,6 +596,7 @@ export const App: React.FC = () => {
       next.delete(id);
       return next;
     });
+    playTickSound();
   };
 
   const handleDuplicateSinglePage = (id: string) => {
@@ -528,22 +612,7 @@ export const App: React.FC = () => {
       next.splice(index + 1, 0, clone);
       return next;
     });
-  };
-
-  const duplicateSelectedPages = () => {
-    setPages((prev) => {
-      const next: PageItem[] = [];
-      for (const p of prev) {
-        next.push(p);
-        if (selectedIds.has(p.id)) {
-          next.push({
-            ...p,
-            id: `page_dup_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-          });
-        }
-      }
-      return next;
-    });
+    playTickSound();
   };
 
   const handleReverseOrder = () => {
@@ -563,6 +632,7 @@ export const App: React.FC = () => {
     } else {
       setPages((prev) => [...prev].reverse());
     }
+    playTickSound();
   };
 
   // Bulk Quick Layout Actions
@@ -572,6 +642,7 @@ export const App: React.FC = () => {
         selectedIds.has(p.id) ? { ...p, layout: { ...p.layout, format } } : p
       )
     );
+    playTickSound();
   };
 
   const handleBulkSetSizing = (sizingMode: SizingMode) => {
@@ -580,6 +651,7 @@ export const App: React.FC = () => {
         selectedIds.has(p.id) ? { ...p, layout: { ...p.layout, sizingMode } } : p
       )
     );
+    playTickSound();
   };
 
   const handleBulkSetOrientation = (orientation: PageOrientation) => {
@@ -588,6 +660,7 @@ export const App: React.FC = () => {
         selectedIds.has(p.id) ? { ...p, layout: { ...p.layout, orientation } } : p
       )
     );
+    playTickSound();
   };
 
   const handleBulkSetMargin = (marginMm: number) => {
@@ -598,6 +671,7 @@ export const App: React.FC = () => {
         selectedIds.has(p.id) ? { ...p, layout: { ...p.layout, marginPt } } : p
       )
     );
+    playTickSound();
   };
 
   const handleUpdatePageLayout = (pageId: string, updates: Partial<PageLayoutOptions>) => {
@@ -630,6 +704,7 @@ export const App: React.FC = () => {
     setPages((prev) =>
       prev.map((p) => (p.id === pageId ? { ...p, crop } : p))
     );
+    playTickSound();
   };
 
   const handleOpenResizeModal = (page?: PageItem) => {
@@ -646,6 +721,7 @@ export const App: React.FC = () => {
         return p;
       })
     );
+    playSuccessSound();
   };
 
   // File Group View Helpers
@@ -656,6 +732,7 @@ export const App: React.FC = () => {
       filePageIds.forEach((id) => next.add(id));
       return next;
     });
+    playTickSound();
   };
 
   const handleRotateFilePages = (fileId: string) => {
@@ -664,12 +741,14 @@ export const App: React.FC = () => {
         p.fileId === fileId ? { ...p, rotation: (p.rotation + 90) % 360 } : p
       )
     );
+    playTickSound();
   };
 
   const handleRemoveFile = (fileId: string) => {
     setPages((prev) => prev.filter((p) => p.fileId !== fileId));
     setFiles((prev) => prev.filter((f) => f.id !== fileId));
     clearPdfCache(fileId);
+    playTickSound();
   };
 
   const handleExtractSelected = () => {
@@ -678,7 +757,7 @@ export const App: React.FC = () => {
   };
 
   const handleResetWorkspace = async () => {
-    if (window.confirm('Clear all pages and start a new empty workspace? This cannot be undone.')) {
+    if (window.confirm('Clear all pages and start a fresh empty workspace?')) {
       clearPdfCache();
       await clearWorkspaceSession();
       setPages([]);
@@ -733,6 +812,7 @@ export const App: React.FC = () => {
           }
         );
         triggerFileDownload(pdfBytes, options.outputFileName);
+        playSuccessSound();
       } else if (['jpg', 'png', 'webp'].includes(options.format)) {
         const mimeType =
           options.format === 'png'
@@ -793,6 +873,7 @@ export const App: React.FC = () => {
         } else {
           downloadAsZip(renderedImages, options.outputFileName);
         }
+        playSuccessSound();
       } else if (options.format === 'split-pdf') {
         const splitPdfs = await generateSplitPdfs(
           targetPages,
@@ -814,6 +895,7 @@ export const App: React.FC = () => {
           splitPdfs.map((s) => ({ name: s.fileName, data: s.data })),
           options.outputFileName
         );
+        playSuccessSound();
       } else if (options.format === 'txt' || options.format === 'csv') {
         const textParts = targetPages.map((p, idx) => {
           const header = `--- PAGE ${idx + 1} (${p.fileName}) ---\n`;
@@ -822,6 +904,7 @@ export const App: React.FC = () => {
         const combinedText = textParts.join('\n\n');
         const blob = new Blob([combinedText], { type: 'text/plain;charset=utf-8' });
         triggerFileDownload(blob, options.outputFileName);
+        playSuccessSound();
       }
     } catch (err) {
       console.error('Export execution error:', err);
@@ -839,11 +922,11 @@ export const App: React.FC = () => {
 
   return (
     <div
-      className="min-h-screen bg-white text-black flex flex-col font-sans selection:bg-black selection:text-white"
+      className="min-h-screen bg-[#fafafa] text-black flex flex-col font-sans selection:bg-black selection:text-white"
       onClick={(e) => {
         // Deselect if clicking on empty workspace background
         const target = e.target as HTMLElement;
-        if (!target.closest('[data-no-deselect]') && !target.closest('button') && !target.closest('input')) {
+        if (!target.closest('[data-page-id]') && !target.closest('button') && !target.closest('input') && !target.closest('select')) {
           if (selectedIds.size > 0) {
             deselectAllPages();
           }
@@ -870,8 +953,8 @@ export const App: React.FC = () => {
         pageCount={pages.length}
         viewMode={viewMode}
         onViewModeChange={setViewMode}
-        cardDensity={cardDensity}
-        onCardDensityChange={setCardDensity}
+        zoomScale={zoomScale}
+        onZoomChange={setZoomScale}
         onAddFilesClick={() => fileInputTriggerRef.current?.click()}
         onPasteClick={handlePasteButtonClick}
         onResetClick={handleResetWorkspace}
@@ -902,8 +985,8 @@ export const App: React.FC = () => {
       {/* Active Workspace View */}
       {pages.length > 0 && (
         <main
+          ref={workspaceContainerRef}
           className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 pt-4"
-          data-no-deselect
         >
           {/* Floating/Sticky Selection Toolbar */}
           <SelectionBar
@@ -912,7 +995,7 @@ export const App: React.FC = () => {
             onRotateCw={handleRotateSelectedCw}
             onRotateCcw={handleRotateSelectedCcw}
             onDelete={deleteSelectedPages}
-            onDuplicate={duplicateSelectedPages}
+            onDuplicate={handleDuplicateSelected}
             onReverseOrder={handleReverseOrder}
             onOpenCrop={() => handleOpenCropModal()}
             onOpenResize={() => handleOpenResizeModal()}
@@ -929,46 +1012,52 @@ export const App: React.FC = () => {
             onBulkSetMargin={handleBulkSetMargin}
           />
 
-          {/* Page Grid or File Grouped View */}
+          {/* Marquee Lasso Drag-to-Select wrapper over Grid */}
           <div className="mt-6">
-            {viewMode === 'unified' ? (
-              <PageGrid
-                pages={pages}
-                selectedIds={selectedIds}
-                density={cardDensity}
-                onReorder={handleReorderPages}
-                onSelect={handlePageSelect}
-                onRotateCw={handleRotateSinglePageCw}
-                onRotateCcw={handleRotateSinglePageCcw}
-                onDelete={handleDeleteSinglePage}
-                onDuplicate={handleDuplicateSinglePage}
-                onOpenCrop={handleOpenCropModal}
-                onOpenResize={handleOpenResizeModal}
-                onOpenPreview={handleOpenPreview}
-                onAddFilesClick={() => fileInputTriggerRef.current?.click()}
-              />
-            ) : (
-              <FileGroupView
-                pages={pages}
-                files={files}
-                selectedIds={selectedIds}
-                density={cardDensity}
-                onReorder={handleReorderPages}
-                onSelect={handlePageSelect}
-                onRotateCw={handleRotateSinglePageCw}
-                onRotateCcw={handleRotateSinglePageCcw}
-                onDelete={handleDeleteSinglePage}
-                onDuplicate={handleDuplicateSinglePage}
-                onOpenCrop={handleOpenCropModal}
-                onOpenResize={handleOpenResizeModal}
-                onOpenPreview={handleOpenPreview}
-                onAddFilesClick={() => fileInputTriggerRef.current?.click()}
-                onSelectFilePages={handleSelectFilePages}
-                onRotateFilePages={handleRotateFilePages}
-                onRemoveFile={handleRemoveFile}
-                onFlattenToUnified={() => setViewMode('unified')}
-              />
-            )}
+            <MarqueeSelection
+              containerRef={workspaceContainerRef}
+              onSelectPages={handleMarqueeSelect}
+            >
+              {viewMode === 'unified' ? (
+                <PageGrid
+                  pages={pages}
+                  selectedIds={selectedIds}
+                  zoomScale={zoomScale}
+                  onReorder={handleReorderPages}
+                  onReorderMultiple={handleReorderMultiple}
+                  onSelect={handlePageSelect}
+                  onRotateCw={handleRotateSinglePageCw}
+                  onRotateCcw={handleRotateSinglePageCcw}
+                  onDelete={handleDeleteSinglePage}
+                  onDuplicate={handleDuplicateSinglePage}
+                  onOpenCrop={handleOpenCropModal}
+                  onOpenResize={handleOpenResizeModal}
+                  onOpenPreview={handleOpenPreview}
+                  onAddFilesClick={() => fileInputTriggerRef.current?.click()}
+                />
+              ) : (
+                <FileGroupView
+                  pages={pages}
+                  files={files}
+                  selectedIds={selectedIds}
+                  zoomScale={zoomScale}
+                  onReorder={handleReorderPages}
+                  onSelect={handlePageSelect}
+                  onRotateCw={handleRotateSinglePageCw}
+                  onRotateCcw={handleRotateSinglePageCcw}
+                  onDelete={handleDeleteSinglePage}
+                  onDuplicate={handleDuplicateSinglePage}
+                  onOpenCrop={handleOpenCropModal}
+                  onOpenResize={handleOpenResizeModal}
+                  onOpenPreview={handleOpenPreview}
+                  onAddFilesClick={() => fileInputTriggerRef.current?.click()}
+                  onSelectFilePages={handleSelectFilePages}
+                  onRotateFilePages={handleRotateFilePages}
+                  onRemoveFile={handleRemoveFile}
+                  onFlattenToUnified={() => setViewMode('unified')}
+                />
+              )}
+            </MarqueeSelection>
           </div>
         </main>
       )}

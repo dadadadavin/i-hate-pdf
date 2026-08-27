@@ -1,7 +1,7 @@
 import React, { memo, useRef, useEffect } from 'react';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { PageItem, CardDensity } from '../types';
+import { PageItem } from '../types';
 import { drawWysiwygPageToCanvas } from '../services/layoutEngine';
 import {
   RotateCw,
@@ -19,22 +19,26 @@ interface PageCardProps {
   page: PageItem;
   displayIndex: number;
   isSelected: boolean;
-  density: CardDensity;
-  onSelect: (id: string, e: React.MouseEvent) => void;
-  onRotateCw: (id: string) => void;
-  onRotateCcw: (id: string) => void;
-  onDelete: (id: string) => void;
-  onDuplicate: (id: string) => void;
-  onOpenCrop: (page: PageItem) => void;
-  onOpenResize: (page: PageItem) => void;
-  onOpenPreview: (index: number) => void;
+  selectedCount?: number;
+  zoomScale?: number;
+  isOverlay?: boolean;
+  onSelect?: (id: string, e: React.MouseEvent) => void;
+  onRotateCw?: (id: string) => void;
+  onRotateCcw?: (id: string) => void;
+  onDelete?: (id: string) => void;
+  onDuplicate?: (id: string) => void;
+  onOpenCrop?: (page: PageItem) => void;
+  onOpenResize?: (page: PageItem) => void;
+  onOpenPreview?: (index: number) => void;
 }
 
 export const PageCard: React.FC<PageCardProps> = memo(({
   page,
   displayIndex,
   isSelected,
-  density,
+  selectedCount = 0,
+  zoomScale = 1.0,
+  isOverlay = false,
   onSelect,
   onRotateCw,
   onRotateCcw,
@@ -51,7 +55,10 @@ export const PageCard: React.FC<PageCardProps> = memo(({
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: page.id });
+  } = useSortable({
+    id: page.id,
+    disabled: isOverlay,
+  });
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imageCacheRef = useRef<HTMLImageElement | null>(null);
@@ -74,7 +81,7 @@ export const PageCard: React.FC<PageCardProps> = memo(({
       }
 
       if (active && imageCacheRef.current && canvasRef.current) {
-        const thumbScale = density === 'compact' ? 0.35 : density === 'large' ? 0.65 : 0.45;
+        const thumbScale = 0.45 * Math.max(0.6, Math.min(1.5, zoomScale));
         drawWysiwygPageToCanvas(imageCacheRef.current, page, canvasRef.current, {
           scaleMultiplier: thumbScale,
           showMarginGuides: page.layout.marginPt > 0,
@@ -87,44 +94,51 @@ export const PageCard: React.FC<PageCardProps> = memo(({
     return () => {
       active = false;
     };
-  }, [page, density]);
+  }, [page, zoomScale]);
 
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
     transition,
-    zIndex: isDragging ? 50 : 1,
-    opacity: isDragging ? 0.35 : 1,
+    zIndex: isDragging ? 50 : isOverlay ? 100 : 1,
+    opacity: isDragging ? 0.25 : 1,
+    width: `${Math.round(230 * zoomScale)}px`,
   };
 
-  const cardWidthClass =
-    density === 'compact'
-      ? 'w-40 sm:w-48'
-      : density === 'large'
-      ? 'w-72 sm:w-88'
-      : 'w-56 sm:w-64';
-
-  const previewHeightClass =
-    density === 'compact'
-      ? 'h-52 sm:h-60'
-      : density === 'large'
-      ? 'h-88 sm:h-104'
-      : 'h-68 sm:h-76';
+  const previewHeight = `${Math.round(270 * zoomScale)}px`;
 
   return (
     <div
       ref={setNodeRef}
       style={style}
-      className={`group relative flex flex-col bg-white border-2 transition-all select-none ${cardWidthClass} ${
-        isSelected
-          ? 'border-black ring-4 ring-black shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] -translate-y-0.5'
-          : 'border-black hover:shadow-[4px_4px_0px_0px_rgba(0,0,0,0.8)]'
+      {...(!isOverlay ? attributes : {})}
+      {...(!isOverlay ? listeners : {})}
+      data-page-id={page.id}
+      className={`group relative flex flex-col bg-white border-2 select-none cursor-grab active:cursor-grabbing transition-shadow duration-150 ${
+        isOverlay
+          ? 'border-black ring-4 ring-black shadow-[12px_12px_0px_0px_rgba(0,0,0,1)] rotate-2 scale-105 pointer-events-none'
+          : isSelected
+          ? 'border-black ring-4 ring-black shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] -translate-y-1'
+          : 'border-black hover:shadow-[4px_4px_0px_0px_rgba(0,0,0,0.8)] hover:-translate-y-0.5'
       }`}
-      onClick={(e) => onSelect(page.id, e)}
+      onClick={(e) => {
+        if (!isOverlay && onSelect) {
+          onSelect(page.id, e);
+        }
+      }}
       onDoubleClick={(e) => {
         e.stopPropagation();
-        onOpenPreview(displayIndex - 1);
+        if (!isOverlay && onOpenPreview) {
+          onOpenPreview(displayIndex - 1);
+        }
       }}
     >
+      {/* Multi-Item Drag Badge (when dragging multiple selected pages) */}
+      {isOverlay && selectedCount > 1 && (
+        <div className="absolute -top-3 -right-3 z-30 bg-black text-white text-xs font-mono font-black px-2.5 py-1 border-2 border-white shadow-lg animate-bounce">
+          +{selectedCount} PAGES
+        </div>
+      )}
+
       {/* Top Meta Bar */}
       <div
         className={`flex items-center justify-between px-2.5 py-1.5 border-b border-black text-xs font-mono transition-colors ${
@@ -132,20 +146,15 @@ export const PageCard: React.FC<PageCardProps> = memo(({
         }`}
       >
         <div className="flex items-center gap-1.5">
-          {/* Drag Handle */}
           <div
-            {...attributes}
-            {...listeners}
-            className={`cursor-grab active:cursor-grabbing p-0.5 -ml-1 ${
-              isSelected ? 'text-neutral-300 hover:text-white' : 'text-neutral-600 hover:text-black'
+            className={`p-0.5 -ml-1 ${
+              isSelected ? 'text-neutral-300' : 'text-neutral-500'
             }`}
-            title="Drag to reorder"
-            onClick={(e) => e.stopPropagation()}
+            title="Drag anywhere on card to reorder"
           >
             <GripVertical size={14} />
           </div>
 
-          {/* Page index badge */}
           <span
             className={`font-bold px-1.5 py-0.2 text-[11px] ${
               isSelected ? 'bg-white text-black' : 'bg-black text-white'
@@ -155,47 +164,52 @@ export const PageCard: React.FC<PageCardProps> = memo(({
           </span>
         </div>
 
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
           {/* Quick Preview Icon */}
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onOpenPreview(displayIndex - 1);
-            }}
-            className={`p-0.5 transition-colors ${
-              isSelected ? 'text-neutral-300 hover:text-white' : 'text-neutral-500 hover:text-black'
-            }`}
-            title="Preview full page (or double-click)"
-          >
-            <Eye size={13} />
-          </button>
+          {onOpenPreview && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenPreview(displayIndex - 1);
+              }}
+              className={`p-0.5 transition-colors ${
+                isSelected ? 'text-neutral-300 hover:text-white' : 'text-neutral-500 hover:text-black'
+              }`}
+              title="Preview full page (or double-click)"
+            >
+              <Eye size={13} />
+            </button>
+          )}
 
           {/* Selection Checkbox */}
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onSelect(page.id, e);
-            }}
-            className={`w-4 h-4 border flex items-center justify-center transition-colors ${
-              isSelected
-                ? 'bg-white text-black border-white'
-                : 'bg-white text-black border-black hover:bg-neutral-100'
-            }`}
-            aria-label="Select page"
-          >
-            {isSelected && <Check size={12} strokeWidth={3.5} />}
-          </button>
+          {onSelect && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onSelect(page.id, e);
+              }}
+              className={`w-4 h-4 border flex items-center justify-center transition-colors ${
+                isSelected
+                  ? 'bg-white text-black border-white'
+                  : 'bg-white text-black border-black hover:bg-neutral-100'
+              }`}
+              aria-label="Select page"
+            >
+              {isSelected && <Check size={12} strokeWidth={3.5} />}
+            </button>
+          )}
         </div>
       </div>
 
       {/* WYSIWYG Sheet Preview Container */}
       <div
-        className={`relative w-full ${previewHeightClass} bg-neutral-200/80 flex items-center justify-center p-3 sm:p-4 overflow-hidden cursor-pointer`}
+        className="relative w-full bg-neutral-200/90 flex items-center justify-center p-3 sm:p-4 overflow-hidden"
+        style={{ height: previewHeight }}
       >
         {/* Paper Sheet Preview with Shadow and Border */}
-        <div className="relative shadow-[0_4px_12px_rgba(0,0,0,0.18)] border border-neutral-400 bg-white flex items-center justify-center max-w-full max-h-full">
+        <div className="relative shadow-[0_4px_14px_rgba(0,0,0,0.18)] border border-neutral-400 bg-white flex items-center justify-center max-w-full max-h-full transition-transform duration-100 group-hover:scale-[1.02]">
           <canvas
             ref={canvasRef}
             className="max-w-full max-h-full object-contain block pointer-events-none"
@@ -217,60 +231,76 @@ export const PageCard: React.FC<PageCardProps> = memo(({
         </div>
 
         {/* Hover Quick Actions Overlay */}
-        <div
-          className="absolute inset-x-0 bottom-0 p-1.5 bg-white/95 border-t border-black opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-around gap-1 z-10"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <button
-            onClick={() => onOpenPreview(displayIndex - 1)}
-            className="p-1 hover:bg-black hover:text-white border border-transparent hover:border-black transition-colors"
-            title="Preview full page"
+        {!isOverlay && (
+          <div
+            className="absolute inset-x-0 bottom-0 p-1.5 bg-white/95 border-t border-black opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-around gap-1 z-10"
+            onClick={(e) => e.stopPropagation()}
           >
-            <Eye size={13} />
-          </button>
-          <button
-            onClick={() => onRotateCcw(page.id)}
-            className="p-1 hover:bg-black hover:text-white border border-transparent hover:border-black transition-colors"
-            title="Rotate Left (-90°)"
-          >
-            <RotateCcw size={13} />
-          </button>
-          <button
-            onClick={() => onRotateCw(page.id)}
-            className="p-1 hover:bg-black hover:text-white border border-transparent hover:border-black transition-colors"
-            title="Rotate Right (+90°)"
-          >
-            <RotateCw size={13} />
-          </button>
-          <button
-            onClick={() => onOpenCrop(page)}
-            className="p-1 hover:bg-black hover:text-white border border-transparent hover:border-black transition-colors"
-            title="Crop page"
-          >
-            <CropIcon size={13} />
-          </button>
-          <button
-            onClick={() => onOpenResize(page)}
-            className="p-1 hover:bg-black hover:text-white border border-transparent hover:border-black transition-colors"
-            title="Layout & Page Sizing"
-          >
-            <Maximize2 size={13} />
-          </button>
-          <button
-            onClick={() => onDuplicate(page.id)}
-            className="p-1 hover:bg-black hover:text-white border border-transparent hover:border-black transition-colors"
-            title="Duplicate page"
-          >
-            <Copy size={13} />
-          </button>
-          <button
-            onClick={() => onDelete(page.id)}
-            className="p-1 hover:bg-black hover:text-white border border-transparent hover:border-black transition-colors"
-            title="Delete page"
-          >
-            <Trash2 size={13} />
-          </button>
-        </div>
+            {onOpenPreview && (
+              <button
+                onClick={() => onOpenPreview(displayIndex - 1)}
+                className="p-1 hover:bg-black hover:text-white border border-transparent hover:border-black transition-colors"
+                title="Preview full page"
+              >
+                <Eye size={13} />
+              </button>
+            )}
+            {onRotateCcw && (
+              <button
+                onClick={() => onRotateCcw(page.id)}
+                className="p-1 hover:bg-black hover:text-white border border-transparent hover:border-black transition-colors"
+                title="Rotate Left (-90°)"
+              >
+                <RotateCcw size={13} />
+              </button>
+            )}
+            {onRotateCw && (
+              <button
+                onClick={() => onRotateCw(page.id)}
+                className="p-1 hover:bg-black hover:text-white border border-transparent hover:border-black transition-colors"
+                title="Rotate Right (+90°)"
+              >
+                <RotateCw size={13} />
+              </button>
+            )}
+            {onOpenCrop && (
+              <button
+                onClick={() => onOpenCrop(page)}
+                className="p-1 hover:bg-black hover:text-white border border-transparent hover:border-black transition-colors"
+                title="Crop page"
+              >
+                <CropIcon size={13} />
+              </button>
+            )}
+            {onOpenResize && (
+              <button
+                onClick={() => onOpenResize(page)}
+                className="p-1 hover:bg-black hover:text-white border border-transparent hover:border-black transition-colors"
+                title="Layout & Page Sizing"
+              >
+                <Maximize2 size={13} />
+              </button>
+            )}
+            {onDuplicate && (
+              <button
+                onClick={() => onDuplicate(page.id)}
+                className="p-1 hover:bg-black hover:text-white border border-transparent hover:border-black transition-colors"
+                title="Duplicate page"
+              >
+                <Copy size={13} />
+              </button>
+            )}
+            {onDelete && (
+              <button
+                onClick={() => onDelete(page.id)}
+                className="p-1 hover:bg-black hover:text-white border border-transparent hover:border-black transition-colors"
+                title="Delete page"
+              >
+                <Trash2 size={13} />
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Bottom Info Bar */}
